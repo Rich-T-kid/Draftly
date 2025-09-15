@@ -1,0 +1,15 @@
+FROM golang:latest
+
+WORKDIR /app
+
+# Copy the source code
+COPY . .
+
+# Build the Go binary
+RUN go build -o app .
+
+# Expose port 8080 (change if needed)
+EXPOSE 8080
+
+# Run the binary
+CMD ["./app"]
