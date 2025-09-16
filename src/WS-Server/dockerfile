@@ -8,8 +8,23 @@ COPY . .
 # Build the Go binary
 RUN go build -o app .
 
-# Expose port 8080 (change if needed)
-EXPOSE 8080
+# Expose port 7070 (change if needed)
+EXPOSE 7070
 
 # Run the binary
 CMD ["./app"]
+
+
+
+#docker buildx create --use --name draftlybuilder-ws || docker buildx use draftlybuilder-ws
+#docker buildx build --no-cache --platform linux/amd64,linux/arm64 -t rich329/draftly-ws:v0.0.1 --push .
+
+
+
+#docker pull rich329/draftly-ws:v0.0.1
+#docker run -d -p 7070:7070 --name draftly-ws rich329/draftly-ws:v0.0.1
+
+
+
+
+# IP:3.130.118.123

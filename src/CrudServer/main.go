@@ -51,11 +51,11 @@ func main() {
 	Connect()
 	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("WebSocket Server is Live"))
+		w.Write([]byte("CRUD Server is Live"))
 	}
 	http.HandleFunc("/health", healthHandler)
-	log.Println("Starting WebSocket server on :" + cfg.WSPort)
-	if err := http.ListenAndServe(":"+cfg.WSPort, nil); err != nil {
+	log.Println("Starting CRUD server on :" + cfg.CrudPort)
+	if err := http.ListenAndServe(":"+cfg.CrudPort, nil); err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
 }

@@ -1,0 +1,15 @@
+{
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "45.76.228.104",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "draftlyDB",
+            "database": "draftly",
+            "username": "user1",
+            "password": "securepassword"
+        }
+    ]
+}

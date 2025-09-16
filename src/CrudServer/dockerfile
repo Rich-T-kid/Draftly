@@ -1,0 +1,29 @@
+FROM golang:latest
+
+WORKDIR /app
+
+# Copy the source code
+COPY . .
+
+# Build the Go binary
+RUN go build -o app .
+
+# Expose port 6060 (change if needed)
+EXPOSE 6060
+
+# Run the binary
+CMD ["./app"]
+
+
+
+#docker buildx create --use --name draftlybuilder-crud || docker buildx use draftlybuilder-crud
+#docker buildx build --no-cache --platform linux/amd64,linux/arm64 -t rich329/draftly-crud:v0.0.1 --push .
+
+
+
+#docker pull rich329/draftly-crud:v0.0.1
+# or can just run this directly
+#docker run -d -p 6060:6060 --name draftly-crud rich329/draftly-crud:v0.0.1
+
+
+# IP:3.13.161.172
