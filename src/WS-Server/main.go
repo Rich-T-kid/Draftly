@@ -2,11 +2,15 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -21,7 +25,15 @@ type config struct {
 	WSPort   string
 }
 
-var cfg *config
+var (
+	cfg        *config
+	dbInstance *sql.DB
+	upgrader   = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+)
 
 func init() {
 	err := godotenv.Load()
@@ -45,22 +57,66 @@ func must(name string) string {
 	}
 	return val
 }
+func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	_ = Connect() //if this doesnt panic the server is fine
+	w.WriteHeader(http.StatusOK)
+	resp := map[string]interface{}{
+		"status": "WS Server is Live",
+		"time":   fmt.Sprint(time.Now().Format(time.RFC3339)),
+	}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Error generating JSON response", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
+func webSocketHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("WebSocket connection established")
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("Upgrade error:", err)
+		return
+	}
+	defer conn.Close()
+	for {
+		// Read message from client
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Read error:", err)
+			break
+		}
+		// TODO: Need to decode the message for the operation and then sent a response
+		// for now this is fine
+		log.Printf("Received: %s", message)
+		var op = Operation{
+			Kind:     "insert",
+			Position: 0,
+			Text:     string(message),
+		}
+		conn.WriteJSON(op)
+	}
+}
+func routes() *mux.Router {
+	r := mux.NewRouter()
+	// Define your routes here
+	r.HandleFunc("/health", HealthCheckHandler)
+	r.HandleFunc("/ws", webSocketHandler)
+	return r
+}
 
 func main() {
-	fmt.Println("Hello, World! WS")
-	Connect()
-	healthHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("WebSocket Server is Live"))
-	}
-	http.HandleFunc("/health", healthHandler)
-	log.Println("Starting WebSocket server on :" + cfg.WSPort)
-	if err := http.ListenAndServe(":"+cfg.WSPort, nil); err != nil {
+	fmt.Printf("server running on port :%s\n", cfg.WSPort)
+	if err := http.ListenAndServe(":"+cfg.WSPort, routes()); err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
 }
 
 func Connect() *sql.DB {
+	if dbInstance != nil {
+		return dbInstance
+	}
 	// Connection parameters
 	host := cfg.Host
 	port := cfg.Port
@@ -86,6 +142,12 @@ func Connect() *sql.DB {
 		log.Fatal("Error connecting to database: ", err)
 	}
 
-	log.Println("Connected to Postgres!")
+	dbInstance = db
 	return db
+}
+
+type Operation struct {
+	Kind     string  `json:"kind"` // cant use type as field name because its a reserved word
+	Position float64 `json:"position"`
+	Text     string  `json:"text"`
 }
