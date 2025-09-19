@@ -1,0 +1,487 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Draftly User & Documents Manager API",
+        "version": "0.1.0",
+        "description": "An API manager for creating, receiving, updating, and deleting Draftly documents and users."
+    },
+    "servers": [
+        {
+            "url": "https://3.13.161.172:6060/v1"
+        }
+    ],
+    "paths": {
+        "/users": {
+            "post": {
+                "summary": "Create a new user",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UserInput"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "User created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/User"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{id}": {
+            "get": {
+                "summary": "Get a user by ID",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "A user object",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/User"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User not found"
+                    }
+                }
+            },
+            "put": {
+                "summary": "Update a user by ID",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UserInput"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated user object",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/User"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User not found"
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete a user by ID",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "User deleted successfully"
+                    },
+                    "404": {
+                        "description": "User not found"
+                    }
+                }
+            }
+        },
+        "/documents/{userId}": {
+            "get": {
+                "summary": "List all documents for a user",
+                "parameters": [
+                    {
+                        "name": "userId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Array of documents for a user",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/Document"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "summary": "Create a new document for a user",
+                "parameters": [
+                    {
+                        "name": "userId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentInput"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Document created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Document"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/documents/{userId}/{documentId}": {
+            "get": {
+                "summary": "Get a specific document for a user",
+                "parameters": [
+                    {
+                        "name": "userId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "documentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "A document object",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Document"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found"
+                    }
+                }
+            },
+            "put": {
+                "summary": "Update a documents metadata for a user",
+                "parameters": [
+                    {
+                        "name": "userId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "documentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentInput"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated document object",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Document"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found"
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete a document for a user",
+                "parameters": [
+                    {
+                        "name": "userId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "documentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Document deleted successfully"
+                    },
+                    "404": {
+                        "description": "Document not found"
+                    }
+                }
+            }
+        },
+        "/documents/{documentId}": {
+            "put": {
+                "summary": "Update a document in the S3 bucket",
+                "description": "Updates the contents of a document stored in S3 by uploading a new file or content.",
+                "parameters": [
+                    {
+                        "name": "documentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Document overrided successfully in S3"
+                    },
+                    "404": {
+                        "description": "Document not found"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "User": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "Alice"
+                    },
+                    "email": {
+                        "type": "string",
+                        "example": "alice@example.com"
+                    }
+                }
+            },
+            "UserInput": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "example": "Alice"
+                    },
+                    "email": {
+                        "type": "string",
+                        "example": "alice@example.com"
+                    }
+                },
+                "required": [
+                    "name",
+                    "email"
+                ]
+            },
+            "Document": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 101
+                    },
+                    "userId": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "title": {
+                        "type": "string",
+                        "example": "Draft Proposal"
+                    },
+                    "content": {
+                        "type": "string",
+                        "example": "This is a draft document."
+                    },
+                    "operations": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {
+                                            "const": "insert"
+                                        },
+                                        "position": {
+                                            "type": "integer",
+                                            "example": 10
+                                        },
+                                        "text": {
+                                            "type": "string",
+                                            "example": "new text"
+                                        }
+                                    },
+                                    "required": [
+                                        "type",
+                                        "position",
+                                        "text"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {
+                                            "const": "delete"
+                                        },
+                                        "position": {
+                                            "type": "integer",
+                                            "example": 5
+                                        },
+                                        "length": {
+                                            "type": "integer",
+                                            "example": 3
+                                        }
+                                    },
+                                    "required": [
+                                        "type",
+                                        "position",
+                                        "length"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "id",
+                    "userId",
+                    "title"
+                ]
+            },
+            "DocumentInput": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "example": "Draft Proposal"
+                    },
+                    "userId": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "allowedUsers": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "userId": {
+                                    "type": "integer",
+                                    "example": 2
+                                },
+                                "permission": {
+                                    "type": "string",
+                                    "enum": [
+                                        "edit",
+                                        "view-only"
+                                    ],
+                                    "example": "edit"
+                                }
+                            },
+                            "required": [
+                                "userId",
+                                "permission"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "title",
+                    "userId"
+                ]
+            }
+        }
+    }
+}
