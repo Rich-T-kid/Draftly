@@ -21,7 +21,7 @@ var (
 			return true
 		},
 	}
-	Managers sync.Map // roomID -> *roomManager
+	manager Managers // roomID -> *roomManager
 )
 
 func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
@@ -46,20 +46,20 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	id := mux.Vars(r)["roomID"]
 	log.Printf("Client connected to room: %s", id)
-	_, err = internal.GetDocument(id)
-	if err != nil {
-		log.Println("Error getting document:", err)
-		conn.WriteJSON(map[string]string{"error": "Error getting document", "details": err.Error()})
-		conn.Close()
-		return
-	}
 	// Upgrade initial GET request to a websocket
-	_ = GetRoomManager(id)
+	m := manager.GetRoomManager(id)
+	m.initClient(conn)
 	defer conn.Close()
+	defer m.removeMember(conn)
 	for {
 		// Read message from client
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				// Normal closure, just clean up
+				m.removeMember(conn)
+				return
+			}
 			log.Println("Read error:", err)
 			break
 		}
@@ -73,18 +73,27 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 		// Now you perform the operation using OT logic
 		// TODO:
 		// once complete write this out to the postgress database
-		// TODO:
+		// TODO: Keep in mind you need to set the timestamp to what ever we stored in the Database
+		ts := time.Now().Format(time.RFC3339)
 
 		// return ack to the client
 		ack := map[string]string{
 			"status":  "acknowledged",
-			"message": fmt.Sprintf("Operation %s at position %f with text '%s' processed", inputOperation.Kind, inputOperation.Position, inputOperation.Text),
+			"message": fmt.Sprintf("Operation %s at position %f with text '%s' processed @ %s", inputOperation.Kind, inputOperation.Position, inputOperation.Text, ts),
 		}
 		err = conn.WriteJSON(ack)
 		if err != nil {
 			log.Println("Write error:", err)
 			break
 		}
+		output := map[string]interface{}{
+			"kind":      inputOperation.Kind,
+			"position":  inputOperation.Position,
+			"text":      inputOperation.Text,
+			"timestamp": ts,
+		}
+		m.broadcast(output, conn) // broadcast to other members
+
 	}
 }
 func routes() *mux.Router {
@@ -96,6 +105,7 @@ func routes() *mux.Router {
 
 func main() {
 	fmt.Printf("server running on port :%s\n", cfg.WSPort)
+	go manager.roomCount()
 	if err := http.ListenAndServe(":"+cfg.WSPort, routes()); err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
@@ -107,47 +117,94 @@ type Operation struct {
 	Text     string  `json:"text"`
 }
 
-type roomManager struct {
-	roomMembers sync.Map // roomID -> map[conn]bool
+type Managers struct {
+	roomMembers sync.Map // roomID -> *roomManager
+}
+
+type wsManager struct {
+	roomMembers sync.Map // conn -> bool (active status)
 	// use roomMembers to keep track of active connections in each room
+	lastUpdate map[string]time.Time // conn/IP -> last update time
 }
 
-func (rm *roomManager) addMember(roomID string, conn *websocket.Conn) {
-	rm.roomMembers.Store(conn, true)
+func (ws *wsManager) initClient(conn *websocket.Conn) {
+	// TODO: read updates from postgress and send to client and then add them to the room and treat them as any other client
+	fmt.Println(ws.lastUpdate)
+	if since, ok := ws.lastUpdate[conn.RemoteAddr().String()]; ok {
+		fmt.Printf("Client %s reconnected, sending updates since %v\n", conn.RemoteAddr().String(), since)
+		// client is reconnecting
+		// send them the updates since their last update from the DB
+	}
+	ws.addMember(conn)
+}
+func (ws *wsManager) addMember(conn *websocket.Conn) {
+	ws.roomMembers.Store(conn, true)
+	ws.lastUpdate[conn.RemoteAddr().String()] = time.Now()
 }
 
-func (rm *roomManager) removeMember(roomID string, conn *websocket.Conn) {
-	rm.roomMembers.Delete(conn)
+func (ws *wsManager) removeMember(conn *websocket.Conn) {
+	ws.roomMembers.Delete(conn)
+	ws.checkEmpty()
 }
-
-func (rm *roomManager) roomCount(roomID string) int {
+func (ws *wsManager) checkEmpty() {
 	count := 0
-	rm.roomMembers.Range(func(k, v interface{}) bool {
+	ws.roomMembers.Range(func(k, v interface{}) bool {
 		if v.(bool) {
 			count++
 		}
 		return true
 	})
-	return count
-}
-func (rm *roomManager) pingClients(roomID string) {
-	// write to clients, if an error or no response set their status to false
-
-}
-func GetRoomManager(roomID string) *roomManager {
-	v, ok := Managers.Load(roomID)
-	if ok {
-		return v.(*roomManager)
+	if count == 0 {
+		// TODO: this is where youd send a request to the CRUD server
+		log.Println("Room is empty, performing cleanup")
 	}
-	rm := &roomManager{}
-	Managers.Store(roomID, rm)
-	return rm
 }
-func RoomStats() {
-	Managers.Range(func(k, v interface{}) bool {
-		fmt.Printf("RoomID: %s, Manager: %v\n", k, v)
+func (ws *wsManager) broadcast(message interface{}, sender *websocket.Conn) {
+	ws.roomMembers.Range(func(k, v interface{}) bool {
+		conn := k.(*websocket.Conn)
+		if conn != sender { // don't send the message back to the sender
+			err := conn.WriteJSON(message)
+			if err != nil {
+				log.Println("Broadcast error:", err)
+				conn.Close()
+				ws.removeMember(conn)
+			}
+			ws.lastUpdate[conn.RemoteAddr().String()] = time.Now()
+		}
 		return true
 	})
+}
+func (m *Managers) GetRoomManager(roomID string) *wsManager {
+	v, ok := m.roomMembers.Load(roomID)
+	if ok {
+		return v.(*wsManager)
+	}
+	rm := &wsManager{
+		roomMembers: sync.Map{},
+		lastUpdate:  make(map[string]time.Time),
+	}
+	m.roomMembers.Store(roomID, rm)
+	return rm
+}
+func (m *Managers) roomCount() {
+	for {
+		m.roomMembers.Range(func(k, v interface{}) bool {
+			roomID := k.(string)
+			rm := v.(*wsManager)
+			count := 0
+			rm.roomMembers.Range(func(k, v interface{}) bool {
+				if v.(bool) {
+					count++
+				}
+				return true
+			})
+			log.Printf("Room %s has %d active members", roomID, count)
+			return true
+		})
+
+		time.Sleep(9 * time.Second)
+	}
+
 }
 
 /*

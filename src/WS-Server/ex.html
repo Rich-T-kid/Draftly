@@ -3,22 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket Client</title>
+    <title>WebSocket Operation Client</title>
 </head>
 <body>
-<h1>WebSocket Client</h1>
+<h1>WebSocket Operation Client</h1>
+
 <div>
-    <input type="text" id="messageInput" placeholder="Enter your message">
-    <button onclick="sendMessage()">Send</button>
+    <label for="kindInput">Kind:</label>
+    <input type="text" id="kindInput" placeholder="insert / delete">
 </div>
+
+<div>
+    <label for="positionInput">Position:</label>
+    <input type="number" id="positionInput" placeholder="e.g. 5" step="1">
+</div>
+
+<div>
+    <label for="textInput">Text:</label>
+    <input type="text" id="textInput" placeholder="Your text here">
+</div>
+
+<button onclick="sendOperation()">Send Operation</button>
+
+<hr>
+
 <div id="messages"></div>
 
 <script>
     let ws;
 
     function connect() {
-        ws = new WebSocket("ws://localhost:7070/ws");
-        
+        ws = new WebSocket("ws://localhost:7070/ws/3");
+
         ws.onopen = function() {
             console.log("Connected to WebSocket server");
         };
@@ -30,7 +46,7 @@
 
         ws.onclose = function() {
             console.log("WebSocket connection closed, retrying...");
-            setTimeout(connect, 500); // Reconnect after 0.5 second
+            setTimeout(connect, 500);
         };
 
         ws.onerror = function(error) {
@@ -38,11 +54,27 @@
         };
     }
 
-    function sendMessage() {
-        let input = document.getElementById("messageInput");
-        let message = input.value;
-        ws.send(message);
-        input.value = "";
+    function sendOperation() {
+        let kind = document.getElementById("kindInput").value.trim();
+        let position = parseFloat(document.getElementById("positionInput").value);
+        let text = document.getElementById("textInput").value;
+
+        let op = {
+            kind: kind,
+            position: position,
+            text: text
+        };
+
+        // Validate before sending
+        if (!kind || isNaN(position)) {
+            alert("Kind and Position are required, and Position must be a number.");
+            return;
+        }
+
+        ws.send(JSON.stringify(op));
+
+        // Optional: clear only the text field for convenience
+        document.getElementById("textInput").value = "";
     }
 
     connect();
