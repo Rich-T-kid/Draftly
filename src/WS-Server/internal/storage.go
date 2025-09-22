@@ -4,65 +4,42 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
-
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
 var (
 	DbInstance *sql.DB
 )
 
-func GetDocument(DocumentID string) (string, error) {
-	if fileExists(DocumentID) {
-		fmt.Println("File exists locally, reading from local storage.")
-		content, err := os.ReadFile(dirName + "/" + DocumentID)
-		if err != nil {
-			return "", err
-		}
-		return string(content), nil
-	}
-	bucket := cfg.Bucket
-	item := DocumentID
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(cfg.Region),
-		Credentials: credentials.NewStaticCredentials(
-			cfg.AwsAccessKey,
-			cfg.AwsSecretKey,
-			"",
-		),
-	})
-	if err != nil {
-		fmt.Println("Error creating session:", err)
-		return "", err
-	}
-	downloader := s3manager.NewDownloader(sess)
-
-	file, err := os.Create(dirName + "/" + item)
-	if err != nil {
-		fmt.Println("Error creating file:", err)
-		return "", err
-	}
-	_, err = downloader.Download(file, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(item),
-	})
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-	return "", nil
+type WriteStore struct {
+	db *sql.DB
 }
-func fileExists(filename string) bool {
-	info, err := os.Stat(dirName + "/" + filename)
-	if os.IsNotExist(err) {
-		return false
+type Operation struct {
+	Kind     string  `json:"kind"` // cant use type as field name because its a reserved word
+	Position float64 `json:"position"`
+	Text     string  `json:"text"`
+	Version  int     `json:"version"`
+}
+
+func (o Operation) Validate() error {
+	if o.Kind != "insert" && o.Kind != "delete" {
+		return fmt.Errorf("invalid operation kind: %s", o.Kind)
 	}
-	return !info.IsDir()
+	if o.Position < 0 {
+		return fmt.Errorf("position cannot be negative: %f", o.Position)
+	}
+	if o.Text == "" {
+		return fmt.Errorf("text cannot be empty")
+	}
+	if o.Version < 0 {
+		return fmt.Errorf("version cannot be negative: %d", o.Version)
+	}
+	return nil
+}
+func NewWriteStore() *WriteStore {
+	if DbInstance == nil {
+		DbInstance = Connect()
+	}
+	return &WriteStore{db: DbInstance}
 }
 
 // Postgress
@@ -98,4 +75,8 @@ func Connect() *sql.DB {
 
 	DbInstance = db
 	return db
+}
+
+func (w *WriteStore) WriteOperation(roomID string, op Operation, timestamp string) error {
+	return nil
 }

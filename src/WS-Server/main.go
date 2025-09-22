@@ -63,18 +63,28 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Read error:", err)
 			break
 		}
-		var inputOperation Operation
+		var inputOperation internal.Operation
 		err = json.Unmarshal(message, &inputOperation)
 		if err != nil {
 			conn.WriteJSON(map[string]string{"error": "Invalid operation format", "input": string(message), "error_details": err.Error()})
+			continue
+		}
+		err = inputOperation.Validate()
+		if err != nil {
+			conn.WriteJSON(map[string]string{"error": "Operation validation failed", "details": err.Error()})
 			continue
 		}
 		log.Printf("Received: %v", inputOperation)
 		// Now you perform the operation using OT logic
 		// TODO:
 		// once complete write this out to the postgress database
-		// TODO: Keep in mind you need to set the timestamp to what ever we stored in the Database
 		ts := time.Now().Format(time.RFC3339)
+		err = internal.NewWriteStore().WriteOperation(id, inputOperation, ts)
+		if err != nil {
+			conn.WriteJSON(map[string]string{"error": "Failed to write operation", "details": err.Error()})
+			continue
+		}
+		// TODO: Keep in mind you need to set the timestamp to what ever we stored in the Database
 
 		// return ack to the client
 		ack := map[string]string{
@@ -109,12 +119,6 @@ func main() {
 	if err := http.ListenAndServe(":"+cfg.WSPort, routes()); err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
-}
-
-type Operation struct {
-	Kind     string  `json:"kind"` // cant use type as field name because its a reserved word
-	Position float64 `json:"position"`
-	Text     string  `json:"text"`
 }
 
 type Managers struct {
