@@ -72,7 +72,7 @@
     </style>
 </head>
 <body>
-    <h1>[test] WebSocket Operation Client</h1>
+    <h1>WebSocket Operation Client</h1>
     <div>
         <label for="kindInput">Kind:</label>
         <input type="text" id="kindInput" placeholder="insert / delete">
@@ -100,77 +100,119 @@
         </div>
     </div>
 
-    <script>
-        let ws;
-        let documentContent = ""; // Store the current document state
-        
-        function connect() {
-            ws = new WebSocket("ws://localhost:7070/ws/3");
-            ws.onopen = function() {
-                console.log("Connected to WebSocket server");
-            };
-            ws.onmessage = function(event) {
-                let rawMessageDisplay = document.getElementById("rawMessages");
-                let documentView = document.getElementById("documentView");
-                
-                // Add raw response
-                rawMessageDisplay.innerHTML += `<p>${event.data}</p>`;
-                
-                // Parse and apply operations to document
-               try {
-                let jsonData = JSON.parse(event.data);
-                console.log("JsonData ->> ", jsonData);
-                
-                if (jsonData.operation) {
-                    let operation = jsonData.operation;
-                    let kind = operation.kind;
-                    let position = parseFloat(operation.position);
-                    let text = operation.text;
-                    
-                    if (kind === "insert" && text) {
-                        // Insert text at position
-                        if (position >= documentContent.length) {
-                            documentContent += text;
-                        } else {
-                            documentContent = documentContent.slice(0, position) + text + documentContent.slice(position);
+   <script>
+let ws;
+let documentContent = ""; // current document state
+let localVersion = 0;     // version the client has
+let nextSeq = 0;          // sequence number per client
+
+function connect() {
+    ws = new WebSocket("ws://3.130.118.123:7070/ws/3?username=client12");
+
+    ws.onopen = function() {
+        console.log("Connected to WebSocket server");
+    };
+
+    ws.onmessage = function(event) {
+        let rawMessageDisplay = document.getElementById("rawMessages");
+        let documentView = document.getElementById("documentView");
+
+        rawMessageDisplay.innerHTML += `<p>${event.data}</p>`;
+
+        try {
+            let jsonData = JSON.parse(event.data);
+
+            switch (jsonData.type) {
+                case "history":
+                    if (Array.isArray(jsonData.operations)) {
+                        jsonData.operations.forEach(op => applyOperation(op));
+                    }
+                    // server should also send current_version here
+                    if (jsonData.current_version !== undefined) {
+                        localVersion = jsonData.current_version;
+                    }
+                    break;
+
+                case "operation":
+                    if (jsonData.operation) {
+                        applyOperation(jsonData.operation);
+                        // 👇 Advance our version
+                        if (jsonData.next_version !== undefined) {
+                            localVersion = jsonData.next_version;
                         }
                     }
-                    // for now no delete operations only inserts
-                    
-                    // Update document view
-                    documentView.textContent = documentContent;
-                }
-                } catch (e) {
-                    console.error("Error parsing message:", e);
-            } 
-            };
-            ws.onclose = function() {
-                console.log("WebSocket connection closed, retrying...");
-                setTimeout(connect, 500);
-            };
-            ws.onerror = function(error) {
-                console.error("WebSocket error:", error);
-            };
-        }
-        function sendOperation() {
-            let kind = document.getElementById("kindInput").value.trim();
-            let position = parseFloat(document.getElementById("positionInput").value);
-            let text = document.getElementById("textInput").value;
-            let op = {
-                kind: kind,
-                position: position,
-                text: text
-            };
-            // Validate before sending
-            if (!kind || isNaN(position)) {
-                alert("Kind and Position are required, and Position must be a number.");
-                return;
+                    break;
+
+                default:
+                    console.warn("Unhandled message type:", jsonData.type);
             }
-            ws.send(JSON.stringify(op));
-            // Optional: clear only the text field for convenience
-            document.getElementById("textInput").value = "";
+
+            documentView.textContent = documentContent;
+        } catch (e) {
+            console.error("Error parsing message:", e);
         }
-        connect();
-    </script>
+    };
+
+    ws.onclose = function() {
+        console.log("WebSocket connection closed, retrying...");
+        setTimeout(connect, 500);
+    };
+
+    ws.onerror = function(error) {
+        console.error("WebSocket error:", error);
+    };
+}
+
+function applyOperation(operation) {
+    let kind = operation.kind;
+    let position = parseInt(operation.position, 10);
+    position = Math.max(0, Math.min(position, documentContent.length));
+    console.log(`Applying operation: ${kind} at ${position}`);
+    let text = operation.text;
+
+    if (kind === "insert" && text) {
+        if (position >= documentContent.length) {
+            documentContent += text;
+        } else {
+            documentContent =
+                documentContent.slice(0, position) +
+                text +
+                documentContent.slice(position);
+        }
+    } else if (kind === "delete") {
+        if (position < documentContent.length) {
+            documentContent =
+                documentContent.slice(0, position) +
+                documentContent.slice(position + 1);
+        }
+    }
+}
+
+function sendOperation() {
+    let kind = document.getElementById("kindInput").value.trim();
+    let position = parseInt(document.getElementById("positionInput").value, 10);
+    let text = document.getElementById("textInput").value;
+
+    if (!kind || isNaN(position)) {
+        alert("Kind and Position are required, and Position must be a number.");
+        return;
+    }
+
+    let op = {
+        kind: kind,
+        position: position,
+        text: text,
+        sequence_number: nextSeq++,
+        cursor_position: 0,
+        version: localVersion, // 👈 include base version
+    };
+
+    ws.send(JSON.stringify(op));
+    document.getElementById("textInput").value = "";
+}
+
+connect();
+</script>
+ 
 </body>
 </html>

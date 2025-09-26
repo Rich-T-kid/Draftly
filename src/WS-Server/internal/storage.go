@@ -21,10 +21,12 @@ type WriteStore struct {
 	file *os.File
 }
 type Operation struct {
-	Kind     string  `json:"kind"` // cant use type as field name because its a reserved word
-	Position float64 `json:"position"`
-	Text     string  `json:"text"`
-	Version  int     `json:"version"`
+	Kind           string `json:"kind"` // cant use type as field name because its a reserved word
+	Position       int    `json:"position"`
+	Text           string `json:"text"`
+	SequenceNumber int    `json:"sequence_number"`
+	CursorPosition int    `json:"cursor_position"`
+	Version        int    `json:"version"`
 }
 
 func (o Operation) Validate() error {
@@ -32,7 +34,7 @@ func (o Operation) Validate() error {
 		return fmt.Errorf("invalid operation kind: %s", o.Kind)
 	}
 	if o.Position < 0 {
-		return fmt.Errorf("position cannot be negative: %f", o.Position)
+		return fmt.Errorf("position cannot be negative: %d", o.Position)
 	}
 	if o.Text == "" {
 		return fmt.Errorf("text cannot be empty")
@@ -90,8 +92,10 @@ func Connect() *sql.DB {
 
 func (w *WriteStore) WriteOperation(roomID string, op Operation, timestamp time.Time) error {
 	// TODO: replace with db later
-	w.file.Write([]byte(fmt.Sprintf("RoomID: (%s), Operation: %s, %f, %s, Version: %d TimeStamp: %s\n", roomID, op.Kind, op.Position, op.Text, op.Version, timestamp.Format(time.RFC3339))))
+	w.file.Write([]byte(fmt.Sprintf("RoomID:(%s),%s,%d,%s,%d,%d,%d,%s\n",
+		roomID, op.Kind, op.Position, op.Text, op.Version, op.SequenceNumber, op.CursorPosition, timestamp.Format(time.RFC3339))))
 	return nil
+	// roomID, kind, position, text, version, sequence_number, cursor_position, timestamp
 }
 func (w *WriteStore) OperationsSince(roomID string, timestamp time.Time) ([]Operation, error) {
 	content, err := os.ReadFile(w.file.Name())
@@ -99,49 +103,46 @@ func (w *WriteStore) OperationsSince(roomID string, timestamp time.Time) ([]Oper
 		return nil, fmt.Errorf("failed to read file: %v", err)
 	}
 
-	// TODO: Grab all the operations from the database since the given timestamp
 	var operations []Operation
 	lines := strings.Split(string(content), "\n")
-	fmt.Println("lines:", lines)
+
 	for _, line := range lines {
+		fmt.Printf("processing line: '%s'\n", line)
 		if line == "" {
 			continue
 		}
-		if !strings.Contains(line, fmt.Sprintf("RoomID: (%s)", roomID)) {
+		if !strings.Contains(line, fmt.Sprintf("RoomID:(%s)", roomID)) {
 			continue
 		}
 
-		// Format: "RoomID: (roomID), Operation: kind, position, text, Version: version TimeStamp: time"
-		parts := strings.Split(line, ", ") // Note: splitting on ", " instead of ","
-		if len(parts) < 4 {
+		// Split the line into parts
+		parts := strings.Split(line, ",")
+		if len(parts) < 7 {
+			fmt.Printf("skipping malformed line: '%s'\n", line)
 			continue
 		}
-
-		// Extract timestamp
-		tsStr := strings.TrimPrefix(parts[len(parts)-1], "TimeStamp: ")
-		ts, err := time.Parse(time.RFC3339, strings.TrimSpace(tsStr))
-		if err != nil {
-			continue
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+			fmt.Printf("part[%d]: '%s'\n", i, parts[i])
 		}
 
-		// Check if operation is after the given timestamp
-		if ts.After(timestamp) {
-			// Parse operation details
-			opParts := strings.Split(parts[1], ": ")
-			kind := strings.TrimSpace(opParts[1])
-			position, _ := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
-			text := strings.TrimSpace(parts[3])
-			versionPart := strings.Split(parts[4], "Version: ")
-			version, _ := strconv.Atoi(strings.TrimSpace(versionPart[1]))
+		// Parse operation details
+		opType := parts[1]
+		pos, _ := strconv.Atoi(parts[2])
+		text := parts[3]
+		version, _ := strconv.Atoi(parts[4])
+		sequenceNumber, _ := strconv.Atoi(parts[5])
+		cursorPosition, _ := strconv.Atoi(parts[6])
 
-			operations = append(operations, Operation{
-				Kind:     kind,
-				Position: position,
-				Text:     text,
-				Version:  version,
-			})
-		}
+		operations = append(operations, Operation{
+			Kind:           opType,
+			Position:       int(pos),
+			Text:           text,
+			Version:        version,
+			SequenceNumber: sequenceNumber,
+			CursorPosition: cursorPosition,
+		})
 	}
-
+	// this is shorted by time by default because we read the file top to bottom
 	return operations, nil
 }

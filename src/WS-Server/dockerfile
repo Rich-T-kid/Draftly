@@ -17,12 +17,12 @@ CMD ["./app"]
 
 
 #docker buildx create --use --name draftlybuilder-ws || docker buildx use draftlybuilder-ws
-#docker buildx build --no-cache --platform linux/amd64,linux/arm64 -t rich329/draftly-ws:v0.0.2 --push .
+#docker buildx build --no-cache --platform linux/amd64,linux/arm64 -t rich329/draftly-ws:v0.0.4 --push .
 
 
 
-#docker pull rich329/draftly-ws:v0.0.2
-#docker run -d -p 7070:7070 --name draftly-ws rich329/draftly-ws:v0.0.2
+#docker pull rich329/draftly-ws:v0.0.4
+#docker run -d -p 7070:7070 --name draftly-ws rich329/draftly-ws:v0.0.4
 
 
 
