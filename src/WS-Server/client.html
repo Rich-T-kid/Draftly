@@ -107,7 +107,7 @@ let localVersion = 0;     // version the client has
 let nextSeq = 0;          // sequence number per client
 
 function connect() {
-    ws = new WebSocket("ws://3.130.118.123:7070/ws/3?username=client12");
+    ws = new WebSocket("ws://localhost:7070/ws/3?username=richard");
 
     ws.onopen = function() {
         console.log("Connected to WebSocket server");
@@ -167,7 +167,6 @@ function applyOperation(operation) {
     let kind = operation.kind;
     let position = parseInt(operation.position, 10);
     position = Math.max(0, Math.min(position, documentContent.length));
-    console.log(`Applying operation: ${kind} at ${position}`);
     let text = operation.text;
 
     if (kind === "insert" && text) {
@@ -179,14 +178,16 @@ function applyOperation(operation) {
                 text +
                 documentContent.slice(position);
         }
-    } else if (kind === "delete") {
+    } else if (kind === "delete" && text) {
+        const count = [...text].length; // handle runes properly
         if (position < documentContent.length) {
             documentContent =
                 documentContent.slice(0, position) +
-                documentContent.slice(position + 1);
+                documentContent.slice(position + count);
         }
     }
 }
+
 
 function sendOperation() {
     let kind = document.getElementById("kindInput").value.trim();

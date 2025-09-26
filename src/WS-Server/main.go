@@ -147,40 +147,62 @@ func (ws *wsManager) Apply(op internal.Operation) internal.Operation {
 	for i := op.Version; i < ws.Version; i++ {
 		newer := ws.Ops[i]
 
-		if newer.Kind != "insert" {
-			continue
-		}
+		switch op.Kind {
+		case "insert":
+			if newer.Kind == "insert" && newer.Position < op.Position {
+				op.Position += utf8.RuneCountInString(newer.Text)
+			}
+			if newer.Kind == "delete" && newer.Position < op.Position {
+				op.Position -= utf8.RuneCountInString(newer.Text)
+				if op.Position < newer.Position {
+					op.Position = newer.Position
+				}
+			}
 
-		//  Only shift if the newer insert is strictly before your op
-		if newer.Position < op.Position {
-			op.Position += utf8.RuneCountInString(newer.Text)
+		case "delete":
+			if newer.Kind == "insert" && newer.Position < op.Position {
+				op.Position += utf8.RuneCountInString(newer.Text)
+			}
+			if newer.Kind == "delete" && newer.Position < op.Position {
+				op.Position -= utf8.RuneCountInString(newer.Text)
+				if op.Position < newer.Position {
+					op.Position = newer.Position
+				}
+			}
 		}
 	}
+
+	ws.Version++
+	op.Version = ws.Version
+	ws.Ops = append(ws.Ops, op)
 	return op
 }
 
 func (ws *wsManager) initClient(conn *websocket.Conn, userName string) {
-	// TODO: read updates from postgress and send to client and then add them to the room and treat them as any other client
-	if since, ok := ws.lastUpdate[userName]; ok {
-		fmt.Printf("Client %s reconnected, sending updates since %v\n", userName, since)
-		w, err := internal.NewWriteStore()
-		if err != nil {
-			log.Println("Error initializing storage:", err)
-			return
-		}
-		ops, err := w.OperationsSince(ws.roomID, since)
-		if err != nil {
-			log.Println("Error fetching operations since last update:", err)
-			return
-		}
-		response := map[string]interface{}{
-			"type":       "history",
-			"since":      since.Format(time.RFC3339),
-			"operations": ops,
-		}
-		conn.WriteJSON(response)
+	since, ok := ws.lastUpdate[userName]
+	if !ok {
+		// First time joining - use Unix epoch to get all operations
+		fmt.Printf("No previous timestamp for user %s, sending full history\n", userName)
+		since = time.Unix(0, 0)
 	}
-	ws.connUsername[conn] = userName
+
+	fmt.Printf("Client %s connected, sending updates since %v\n", conn.LocalAddr().String(), since)
+	w, err := internal.NewWriteStore()
+	if err != nil {
+		log.Println("Error initializing storage:", err)
+		return
+	}
+	ops, err := w.OperationsSince(ws.roomID, since)
+	if err != nil {
+		log.Println("Error fetching operations since last update:", err)
+		return
+	}
+	response := map[string]interface{}{
+		"type":       "history",
+		"operations": ops,
+		"since":      since.Format(time.RFC3339),
+	}
+	conn.WriteJSON(response)
 	ws.addMember(conn, userName)
 }
 
