@@ -346,6 +346,16 @@
                     "email": {
                         "type": "string",
                         "example": "alice@example.com"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-01T04:37:57.53296Z"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-01T04:37:57.53296Z"
                     }
                 }
             },
@@ -433,6 +443,21 @@
                                 }
                             ]
                         }
+                    },
+                    "s3_key": {
+                        "type": "string",
+                        "nullable": true,
+                        "example": "documents/101/content.txt"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-01T04:37:57.53296Z"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2025-10-01T04:37:57.53296Z"
                     }
                 },
                 "required": [

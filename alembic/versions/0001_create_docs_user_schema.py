@@ -21,7 +21,6 @@ def upgrade():
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
         sa.Column("user_id", sa.Integer, sa.ForeignKey("Users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("content", sa.Text, nullable=True),
         sa.Column("operations", sa.JSON, nullable=False, server_default=sa.text("'[]'")),
         sa.Column("s3_key", sa.String(255), nullable=True),
         sa.Column("created_at", sa.TIMESTAMP, nullable=False, server_default=sa.text('CURRENT_TIMESTAMP')),
