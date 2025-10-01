@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -140,7 +141,7 @@ type wsManager struct {
 	connUsername map[*websocket.Conn]string
 	// Operation transform Management
 	Ops     []internal.Operation
-	Version int
+	Version int32
 }
 
 func (ws *wsManager) Apply(op internal.Operation) internal.Operation {
@@ -172,7 +173,7 @@ func (ws *wsManager) Apply(op internal.Operation) internal.Operation {
 		}
 	}
 
-	ws.Version++
+	atomic.AddInt32(&ws.Version, 1)
 	op.Version = ws.Version
 	ws.Ops = append(ws.Ops, op)
 	return op
