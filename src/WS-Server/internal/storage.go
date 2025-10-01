@@ -26,7 +26,7 @@ type Operation struct {
 	Text           string `json:"text"`
 	SequenceNumber int    `json:"sequence_number"`
 	CursorPosition int    `json:"cursor_position"`
-	Version        int    `json:"version"`
+	Version        int32  `json:"version"`
 }
 
 func (o Operation) Validate() error {
@@ -138,7 +138,7 @@ func (w *WriteStore) OperationsSince(roomID string, timestamp time.Time) ([]Oper
 			Kind:           opType,
 			Position:       int(pos),
 			Text:           text,
-			Version:        version,
+			Version:        int32(version),
 			SequenceNumber: sequenceNumber,
 			CursorPosition: cursorPosition,
 		})
