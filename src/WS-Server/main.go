@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -39,16 +40,23 @@ func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonResp)
 }
 func webSocketHandler(w http.ResponseWriter, r *http.Request) {
+	// Upgrade initial GET request to a websocket
+	id := mux.Vars(r)["roomID"]
+	userName := r.URL.Query().Get("username")
+	if userName == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Missing username"))
+		return
+	}
+	// Upgrade initial GET request to a websocket
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("Upgrade error:", err)
 		return
 	}
-	id := mux.Vars(r)["roomID"]
-	log.Printf("Client connected to room: %s", id)
-	// Upgrade initial GET request to a websocket
 	m := manager.GetRoomManager(id)
-	m.initClient(conn)
+	m.initClient(conn, userName)
 	defer conn.Close()
 	defer m.removeMember(conn)
 	for {
@@ -77,31 +85,29 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Received: %v", inputOperation)
 		// Now you perform the operation using OT logic
 		// TODO:
-		// once complete write this out to the postgress database
-		ts := time.Now().Format(time.RFC3339)
-		err = internal.NewWriteStore().WriteOperation(id, inputOperation, ts)
+
+		outputOperation := m.Apply(inputOperation)
+
+		// write this out to the postgress database
+		ts := time.Now()
+		w, err := internal.NewWriteStore()
+		if err != nil {
+			conn.WriteJSON(map[string]string{"error": "Failed to initialize storage", "details": err.Error()})
+			continue
+		}
+		err = w.WriteOperation(id, inputOperation, ts)
+
 		if err != nil {
 			conn.WriteJSON(map[string]string{"error": "Failed to write operation", "details": err.Error()})
 			continue
 		}
-		// TODO: Keep in mind you need to set the timestamp to what ever we stored in the Database
-
-		// return ack to the client
-		ack := map[string]string{
-			"status":  "acknowledged",
-			"message": fmt.Sprintf("Operation %s at position %f with text '%s' processed @ %s", inputOperation.Kind, inputOperation.Position, inputOperation.Text, ts),
-		}
-		err = conn.WriteJSON(ack)
-		if err != nil {
-			log.Println("Write error:", err)
-			break
-		}
+		// process the input and stream it to everyone
 		output := map[string]interface{}{
-			"kind":      inputOperation.Kind,
-			"position":  inputOperation.Position,
-			"text":      inputOperation.Text,
-			"timestamp": ts,
+			"type":      "operation",
+			"ts":        ts.Format(time.RFC3339),
+			"operation": outputOperation,
 		}
+		fmt.Printf("broadcasting: %v to all connected clients in room %s\n", output, m.roomID)
 		m.broadcast(output, conn) // broadcast to other members
 
 	}
@@ -109,6 +115,7 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 func routes() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/health", HealthCheckHandler)
+	// ?username=richard
 	r.HandleFunc("/ws/{roomID}", webSocketHandler)
 	return r
 }
@@ -126,30 +133,89 @@ type Managers struct {
 }
 
 type wsManager struct {
+	roomID      string
 	roomMembers sync.Map // conn -> bool (active status)
 	// use roomMembers to keep track of active connections in each room
-	lastUpdate map[string]time.Time // conn/IP -> last update time
+	lastUpdate   map[string]time.Time // conn/IP -> last update time
+	connUsername map[*websocket.Conn]string
+	// Operation transform Management
+	Ops     []internal.Operation
+	Version int
 }
 
-func (ws *wsManager) initClient(conn *websocket.Conn) {
-	// TODO: read updates from postgress and send to client and then add them to the room and treat them as any other client
-	fmt.Println(ws.lastUpdate)
-	if since, ok := ws.lastUpdate[conn.RemoteAddr().String()]; ok {
-		fmt.Printf("Client %s reconnected, sending updates since %v\n", conn.RemoteAddr().String(), since)
-		// client is reconnecting
-		// send them the updates since their last update from the DB
+func (ws *wsManager) Apply(op internal.Operation) internal.Operation {
+	for i := op.Version; i < ws.Version; i++ {
+		newer := ws.Ops[i]
+
+		switch op.Kind {
+		case "insert":
+			if newer.Kind == "insert" && newer.Position < op.Position {
+				op.Position += utf8.RuneCountInString(newer.Text)
+			}
+			if newer.Kind == "delete" && newer.Position < op.Position {
+				op.Position -= utf8.RuneCountInString(newer.Text)
+				if op.Position < newer.Position {
+					op.Position = newer.Position
+				}
+			}
+
+		case "delete":
+			if newer.Kind == "insert" && newer.Position < op.Position {
+				op.Position += utf8.RuneCountInString(newer.Text)
+			}
+			if newer.Kind == "delete" && newer.Position < op.Position {
+				op.Position -= utf8.RuneCountInString(newer.Text)
+				if op.Position < newer.Position {
+					op.Position = newer.Position
+				}
+			}
+		}
 	}
-	ws.addMember(conn)
+
+	ws.Version++
+	op.Version = ws.Version
+	ws.Ops = append(ws.Ops, op)
+	return op
 }
-func (ws *wsManager) addMember(conn *websocket.Conn) {
+
+func (ws *wsManager) initClient(conn *websocket.Conn, userName string) {
+	since, ok := ws.lastUpdate[userName]
+	if !ok {
+		// First time joining - use Unix epoch to get all operations
+		fmt.Printf("No previous timestamp for user %s, sending full history\n", userName)
+		since = time.Unix(0, 0)
+	}
+
+	fmt.Printf("Client %s connected, sending updates since %v\n", conn.LocalAddr().String(), since)
+	w, err := internal.NewWriteStore()
+	if err != nil {
+		log.Println("Error initializing storage:", err)
+		return
+	}
+	ops, err := w.OperationsSince(ws.roomID, since)
+	if err != nil {
+		log.Println("Error fetching operations since last update:", err)
+		return
+	}
+	response := map[string]interface{}{
+		"type":       "history",
+		"operations": ops,
+		"since":      since.Format(time.RFC3339),
+	}
+	conn.WriteJSON(response)
+	ws.addMember(conn, userName)
+}
+
+func (ws *wsManager) addMember(conn *websocket.Conn, userName string) {
 	ws.roomMembers.Store(conn, true)
-	ws.lastUpdate[conn.RemoteAddr().String()] = time.Now()
+	ws.lastUpdate[userName] = time.Now()
 }
 
 func (ws *wsManager) removeMember(conn *websocket.Conn) {
 	ws.roomMembers.Delete(conn)
 	ws.checkEmpty()
 }
+
 func (ws *wsManager) checkEmpty() {
 	count := 0
 	ws.roomMembers.Range(func(k, v interface{}) bool {
@@ -159,37 +225,47 @@ func (ws *wsManager) checkEmpty() {
 		return true
 	})
 	if count == 0 {
-		// TODO: this is where youd send a request to the CRUD server
 		log.Println("Room is empty, performing cleanup")
+		_ = closeRoomRequest(ws.roomID)
 	}
 }
-func (ws *wsManager) broadcast(message interface{}, sender *websocket.Conn) {
+
+func (ws *wsManager) broadcast(message interface{}, _ *websocket.Conn) {
 	ws.roomMembers.Range(func(k, v interface{}) bool {
 		conn := k.(*websocket.Conn)
-		if conn != sender { // don't send the message back to the sender
-			err := conn.WriteJSON(message)
-			if err != nil {
-				log.Println("Broadcast error:", err)
-				conn.Close()
-				ws.removeMember(conn)
-			}
-			ws.lastUpdate[conn.RemoteAddr().String()] = time.Now()
+		//if conn != sender { // don't send the message back to the sender
+
+		err := conn.WriteJSON(message)
+		if err != nil {
+			log.Println("Broadcast error:", err)
+			conn.Close()
+			ws.removeMember(conn)
+		}
+
+		//}
+		k1, ok := ws.connUsername[conn]
+		if ok {
+			ws.lastUpdate[k1] = time.Now()
 		}
 		return true
 	})
 }
+
 func (m *Managers) GetRoomManager(roomID string) *wsManager {
 	v, ok := m.roomMembers.Load(roomID)
 	if ok {
 		return v.(*wsManager)
 	}
 	rm := &wsManager{
-		roomMembers: sync.Map{},
-		lastUpdate:  make(map[string]time.Time),
+		roomID:       roomID,
+		roomMembers:  sync.Map{},
+		lastUpdate:   make(map[string]time.Time),
+		connUsername: make(map[*websocket.Conn]string),
 	}
 	m.roomMembers.Store(roomID, rm)
 	return rm
 }
+
 func (m *Managers) roomCount() {
 	for {
 		m.roomMembers.Range(func(k, v interface{}) bool {
@@ -206,9 +282,16 @@ func (m *Managers) roomCount() {
 			return true
 		})
 
-		time.Sleep(9 * time.Second)
+		time.Sleep(30 * time.Second)
 	}
 
+}
+
+func closeRoomRequest(roomID string) error {
+	// TODO: send a request to the compaction service (CRUD) to save the file and then delete the room from memory
+	// dont forget to remove from manager
+	// delete the roomManager -> cleans up connections to usernames and stuff easier than doing one by one
+	return nil
 }
 
 /*
@@ -234,7 +317,7 @@ TODO :
 (1). Read in content from S3  as a string -> DONE
 (2). When a client joins a ws/{roomID} create a helper function to return the latest content from in memeory representation of that file -> DONE
 (3). add Error checking to make sure the shape of all the request from the front end is an Operation -> DONE
-(4). Add metaData about rooms (# of users) so that when theres no more users we can send a message to the compaction service to save the file ->
+(4). Add metaData about rooms (# of users) so that when theres no more users we can send a message to the compaction service to save the file -> Done
 to do this we need to keep track of each users when they join, have a heartbreat to check if their still there and then on checks for heartbreat if no one responds the room is considered closed -> DONE
 
 

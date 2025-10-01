@@ -34,7 +34,6 @@ func init() {
 			log.Fatal("Error creating directory:", err)
 			return
 		}
-
 	}
 }
 
