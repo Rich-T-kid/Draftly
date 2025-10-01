@@ -1,91 +1,116 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 
-	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
+	"Draftly/CRUD/handlers"
+	"Draftly/CRUD/services"
+
+	"github.com/gorilla/mux"
 )
 
-type config struct {
-	Host     string
-	Port     string
-	User     string
-	Password string
-	DbName   string
-	CrudPort string
-	WSPort   string
-}
-
-var cfg *config
-
-func init() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file ", err)
-	}
-	cfg = &config{
-		Host:     must("POSTGRESS_HOST"),
-		Port:     must("POSTGRESS_PORT"),
-		User:     must("POSTGRESS_USER"),
-		Password: must("POSTGRESS_PASSWORD"),
-		DbName:   must("POSTGRESS_DB_NAME"),
-		CrudPort: must("CRUD_PORT"),
-		WSPort:   must("WS_PORT"),
-	}
-}
-func must(name string) string {
-	val := os.Getenv(name)
-	if val == "" {
-		log.Fatalf("Environment variable %s not set", name)
-	}
-	return val
-}
-
 func main() {
-	fmt.Println("Hello, World! WS")
-	Connect()
-	healthHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("CRUD Server is Live"))
+	// Initialize database service
+	dbService, err := services.NewDatabaseService()
+	if err != nil {
+		log.Fatalf("Failed to initialize database service: %v", err)
 	}
-	http.HandleFunc("/health", healthHandler)
-	log.Println("Starting CRUD server on :" + cfg.CrudPort)
-	if err := http.ListenAndServe(":"+cfg.CrudPort, nil); err != nil {
-		log.Fatal("ListenAndServe: ", err)
+	defer dbService.Close()
+
+	// Initialize S3 service with better error handling
+	fmt.Println("DEBUG: Attempting to initialize S3 service...")
+	s3Service, err := services.NewS3Service()
+	if err != nil {
+		log.Printf("WARNING: S3 service failed to initialize: %v", err)
+		log.Printf("Continuing without S3 service - content upload will fail")
+		// Don't exit - continue without S3 for now
+	} else {
+		fmt.Println("DEBUG: S3 service initialized successfully")
+	}
+
+	// Initialize handlers
+	userHandler := handlers.NewUserHandler(dbService)
+	documentHandler := handlers.NewDocumentHandler(dbService, s3Service)
+
+	// Create router
+	r := mux.NewRouter()
+
+	// Add request logging middleware
+	r.Use(loggingMiddleware)
+
+	// API version prefix
+	api := r.PathPrefix("/v1").Subrouter()
+
+	// User routes
+	api.HandleFunc("/users", userHandler.CreateUser).Methods("POST")
+	api.HandleFunc("/users/{id}", userHandler.GetUser).Methods("GET")
+	api.HandleFunc("/users/{id}", userHandler.UpdateUser).Methods("PUT")
+	api.HandleFunc("/users/{id}", userHandler.DeleteUser).Methods("DELETE")
+
+	// Document routes
+	api.HandleFunc("/documents/{userId}", documentHandler.CreateDocument).Methods("POST")
+	fmt.Println("DEBUG: Registered POST /documents/{userId} route")
+	api.HandleFunc("/documents/{userId}", documentHandler.GetUserDocuments).Methods("GET")
+	api.HandleFunc("/documents/{userId}/{documentId}", documentHandler.GetDocument).Methods("GET")
+	api.HandleFunc("/documents/{userId}/{documentId}", documentHandler.UpdateDocument).Methods("PUT")
+	api.HandleFunc("/documents/{userId}/{documentId}", documentHandler.DeleteDocument).Methods("DELETE")
+
+	// Document content route (S3 update)
+	api.HandleFunc("/documents/{documentId}", documentHandler.UpdateDocumentContent).Methods("PUT")
+
+	// CORS middleware
+	api.Use(corsMiddleware)
+
+	// Health check endpoint
+	r.HandleFunc("/health", healthCheck).Methods("GET")
+
+	// Get port from environment or default to 6060
+	port := os.Getenv("CRUD_PORT")
+	if port == "" {
+		port = "6060"
+	}
+
+	log.Printf("Starting Draftly API server on port %s", port)
+	log.Printf("Health check available at: http://localhost:%s/health", port)
+	log.Printf("API endpoints available at: http://localhost:%s/v1", port)
+
+	// Start server
+	if err := http.ListenAndServe(":"+port, r); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
 	}
 }
 
-func Connect() *sql.DB {
-	// Connection parameters
-	host := cfg.Host
-	port := cfg.Port
-	user := cfg.User
-	password := cfg.Password
-	dbname := cfg.DbName
+// loggingMiddleware logs all incoming requests
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Printf("Request: %s %s\n", r.Method, r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+}
 
-	// Build connection string
-	psqlInfo := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname,
-	)
+// corsMiddleware handles CORS headers
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-	// Open database
-	db, err := sql.Open("postgres", psqlInfo)
-	if err != nil {
-		log.Fatal("Error opening database: ", err)
-	}
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 
-	// Verify connection
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("Error connecting to database: ", err)
-	}
+		next.ServeHTTP(w, r)
+	})
+}
 
-	log.Println("Connected to Postgres!")
-	return db
+// healthCheck provides a simple health check endpoint
+func healthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status": "healthy", "service": "draftly-api"}`))
 }

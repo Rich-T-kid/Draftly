@@ -1,4 +1,4 @@
-package db
+package services
 
 import (
 	"database/sql"
@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -16,6 +17,12 @@ type DatabaseService struct {
 
 // NewDatabaseService creates a new database service instance
 func NewDatabaseService() (*DatabaseService, error) {
+	// Load .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+
 	// Get environment variables
 	host := os.Getenv("POSTGRESS_HOST")
 	port := os.Getenv("POSTGRESS_PORT")
@@ -23,16 +30,32 @@ func NewDatabaseService() (*DatabaseService, error) {
 	password := os.Getenv("POSTGRESS_PASSWORD")
 	dbname := os.Getenv("POSTGRESS_DB_NAME")
 
-	// Validate required environment variables
-	if host == "" || port == "" || user == "" || password == "" || dbname == "" {
-		return nil, fmt.Errorf("missing required environment variables")
+	missing := []string{}
+
+	if host == "" {
+		missing = append(missing, "host")
+	}
+	if port == "" {
+		missing = append(missing, "port")
+	}
+	if user == "" {
+		missing = append(missing, "user")
+	}
+	if password == "" {
+		missing = append(missing, "password")
+	}
+	if dbname == "" {
+		missing = append(missing, "dbname")
 	}
 
-	// Build connection string
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("missing required environment variables: %v", missing)
+	}
+
 	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
 
-	// Open database connection
+	// Open db connection
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
@@ -49,7 +72,7 @@ func NewDatabaseService() (*DatabaseService, error) {
 	return &DatabaseService{db: db}, nil
 }
 
-// Close closes the database connection
+// Close closes connection
 func (ds *DatabaseService) Close() error {
 	if ds.db != nil {
 		return ds.db.Close()
